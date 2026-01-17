@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  # Nginx reverse proxy with Let's Encrypt
+  nginx:
+    image: nginx:alpine
+    container_name: cds-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot-etc:/etc/letsencrypt:ro
+      - certbot-var:/var/lib/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    depends_on:
+      - cql-services
+      - authoring-frontend
+      - authoring-api
+    restart: unless-stopped
+    networks:
+      - cds-network
+
+  # Certbot for Let's Encrypt SSL
+  certbot:
+    image: certbot/certbot
+    container_name: cds-certbot
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    # Run certbot renew every 12 hours
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - cds-network
+
+  # CQL Services (your fork)
+  cql-services:
+    image: ghcr.io/iupui-soic/ahrq-cds-connect-cql-services:${CQL_SERVICES_VERSION:-latest}
+    container_name: cds-cql-services
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - UMLS_API_KEY=${UMLS_API_KEY}
+      - CQL_SERVICES_MAX_REQUEST_SIZE=${CQL_SERVICES_MAX_REQUEST_SIZE:-2mb}
+      - IGNORE_VSAC_ERRORS=${IGNORE_VSAC_ERRORS:-false}
+      - CARD_LOGGING=${CARD_LOGGING:-off}
+    volumes:
+      - ./config/libraries:/usr/src/app/config/libraries:ro
+      - ./config/hooks:/usr/src/app/config/hooks:ro
+      - vsac-cache:/usr/src/app/.vsac_cache
+    restart: unless-stopped
+    networks:
+      - cds-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # CDS Authoring Tool - API Backend
+  authoring-api:
+    image: ghcr.io/iupui-soic/ahrq-cds-connect-authoring-tool-api:${AUTHORING_TOOL_VERSION:-latest}
+    container_name: cds-authoring-api
+    environment:
+      - NODE_ENV=production
+      - MONGO_URL=mongodb://mongodb:27017/cds-authoring
+      - CQL_TO_ELM_URL=http://cql-to-elm:8080/cql/translator
+      - API_PORT=3001
+      - AUTH_SESSION_SECRET=${AUTH_SESSION_SECRET}
+      - UMLS_API_KEY=${UMLS_API_KEY}
+      - REPO_PUBLISH_ENDPOINT=${REPO_PUBLISH_ENDPOINT:-}
+      - REPO_PUBLISH_TOKEN=${REPO_PUBLISH_TOKEN:-}
+    depends_on:
+      - mongodb
+      - cql-to-elm
+    restart: unless-stopped
+    networks:
+      - cds-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/authoring/api/config"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # CDS Authoring Tool - Frontend
+  authoring-frontend:
+    image: ghcr.io/iupui-soic/ahrq-cds-connect-authoring-tool-frontend:${AUTHORING_TOOL_VERSION:-latest}
+    container_name: cds-authoring-frontend
+    environment:
+      - NODE_ENV=production
+      - PORT=9000
+      - REACT_APP_API_URL=/authoring/api
+      - REACT_APP_DAP_URL=${REACT_APP_DAP_URL:-}
+      - REACT_APP_GTM_KEY=${REACT_APP_GTM_KEY:-}
+    depends_on:
+      - authoring-api
+    restart: unless-stopped
+    networks:
+      - cds-network
+
+  # MongoDB for Authoring Tool
+  mongodb:
+    image: mongo:6.0
+    container_name: cds-mongodb
+    environment:
+      - MONGO_INITDB_DATABASE=cds-authoring
+    volumes:
+      - mongodb-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - cds-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # CQL-to-ELM Translation Service
+  cql-to-elm:
+    image: cqframework/cql-translation-service:latest
+    container_name: cds-cql-to-elm
+    restart: unless-stopped
+    networks:
+      - cds-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/cql/translator"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  vsac-cache:
+    name: cds-vsac-cache
+  mongodb-data:
+    name: cds-mongodb-data
+  certbot-etc:
+    name: cds-certbot-etc
+  certbot-var:
+    name: cds-certbot-var
+  certbot-webroot:
+    name: cds-certbot-webroot
+
+networks:
+  cds-network:
+    name: cds-network
+    driver: bridge

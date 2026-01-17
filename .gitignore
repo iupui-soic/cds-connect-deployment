@@ -1,0 +1,29 @@
+# IDE and editor files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables (contains secrets)
+.env
+
+# SSL certificates (managed by certbot)
+certbot/
+
+# Backups
+backups/
+
+# Config files with actual CQL libraries (may be large or proprietary)
+config/libraries/*
+!config/libraries/.gitkeep
+config/hooks/*
+!config/hooks/.gitkeep
+
+# MongoDB init scripts with credentials
+mongo-init/
