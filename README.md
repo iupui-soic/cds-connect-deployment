@@ -71,7 +71,30 @@ chmod +x init-ssl.sh
 ./init-ssl.sh
 ```
 
-### 4. Deploy
+### 4. Configure Users
+
+Create a users file with bcrypt-hashed passwords:
+
+```bash
+# Copy the example file
+cp config/local-users.example.json config/local-users.json
+
+# Generate a bcrypt hash for each user password
+node -e "require('bcryptjs').hash('your-password-here', 10).then(console.log)"
+```
+
+Edit `config/local-users.json` with your users:
+
+```json
+{
+  "admin": "$2b$10$your-bcrypt-hash-here",
+  "researcher1": "$2b$10$another-bcrypt-hash"
+}
+```
+
+> **Security Note:** Never commit `local-users.json` to version control. It's already in `.gitignore`.
+
+### 5. Deploy
 
 ```bash
 # Pull images and start all services
@@ -84,6 +107,62 @@ docker-compose ps
 # View logs
 docker-compose logs -f
 ```
+
+## User Management
+
+### Creating Users
+
+Users are defined in `config/local-users.json`. Each entry is a username with a bcrypt-hashed password.
+
+#### Generate Password Hashes
+
+**Option 1: Using Node.js (requires bcryptjs)**
+```bash
+node -e "require('bcryptjs').hash('mypassword', 10).then(console.log)"
+```
+
+**Option 2: Using Docker (no local Node.js required)**
+```bash
+docker run --rm node:18-alpine sh -c \
+  "npm install -g bcryptjs && node -e \"require('bcryptjs').hash('mypassword', 10).then(console.log)\""
+```
+
+**Option 3: Using an online bcrypt generator**
+- Use cost factor/rounds: 10
+- Example sites: bcrypt-generator.com, browserling.com/tools/bcrypt
+
+#### Example Users File
+
+```json
+{
+  "admin": "$2b$10$N9qo8uLOickgx2ZMRZoMye1234567890abcdefghij",
+  "alice": "$2b$10$abcdefghij1234567890NOqo8uLOickgx2ZMRZoMye",
+  "bob": "$2b$10$1234567890abcdefghijN9qo8uLOickgx2ZMRZoMye"
+}
+```
+
+### Adding New Users
+
+1. Generate a bcrypt hash for the new user's password
+2. Add the username and hash to `config/local-users.json`
+3. Restart the authoring tool (or it will pick up changes on next login attempt):
+   ```bash
+   docker-compose restart authoring-tool
+   ```
+
+### Changing Passwords
+
+1. Generate a new bcrypt hash for the new password
+2. Update the hash in `config/local-users.json`
+3. Restart the authoring tool:
+   ```bash
+   docker-compose restart authoring-tool
+   ```
+
+### Removing Users
+
+1. Delete the user's line from `config/local-users.json`
+2. Restart the authoring tool
 
 ## File Structure
 
@@ -102,7 +181,9 @@ cds-connect-deployment/
 │       └── cdsconnect-init.conf # Initial config for SSL setup
 ├── config/
 │   ├── libraries/               # Your CQL/ELM libraries
-│   └── hooks/                   # Your CDS Hooks configurations
+│   ├── hooks/                   # Your CDS Hooks configurations
+│   ├── local-users.example.json # Example users file (template)
+│   └── local-users.json         # Your users (DO NOT COMMIT)
 └── .github/workflows/
     ├── docker-build-cql-services.yml    # CI workflow for CQL Services
     └── docker-build-authoring-tool.yml  # CI workflow for Authoring Tool
@@ -149,7 +230,8 @@ By default, ghcr.io images are private. To make them public:
 | `DOMAIN` | Yes | Your domain (e.g., cdsconnect.org) |
 | `LETSENCRYPT_EMAIL` | Yes | Email for Let's Encrypt notifications |
 | `UMLS_API_KEY` | Yes | UMLS API key for VSAC downloads |
-| `AUTH_SESSION_SECRET` | Yes | Secret for session encryption |
+| `AUTH_SESSION_SECRET` | Yes | Secret for session encryption (min 32 chars) |
+| `AUTH_LOCAL_ACTIVE` | No | Enable local authentication (default: true) |
 | `CQL_SERVICES_VERSION` | No | Image tag (default: latest) |
 | `AUTHORING_TOOL_VERSION` | No | Image tag (default: latest) |
 
@@ -253,9 +335,11 @@ docker-compose logs certbot
 
 ## Security Considerations
 
-1. **Never commit `.env`** - Contains secrets
-2. **Use specific image tags in production** - Not `latest`
-3. **Enable HSTS** - Uncomment in nginx config after SSL confirmed working
-4. **MongoDB authentication** - Consider enabling for production
-5. **Firewall** - Only expose ports 80/443 externally
-6. **Secrets rotation** - Periodically rotate `AUTH_SESSION_SECRET`
+1. **Never commit `.env` or `local-users.json`** - Contains secrets and password hashes
+2. **Use bcrypt for passwords** - Never store plain text passwords in `local-users.json`
+3. **Use specific image tags in production** - Not `latest`
+4. **Enable HSTS** - Uncomment in nginx config after SSL confirmed working
+5. **MongoDB authentication** - Consider enabling for production
+6. **Firewall** - Only expose ports 80/443 externally
+7. **Secrets rotation** - Periodically rotate `AUTH_SESSION_SECRET`
+8. **Strong passwords** - Require strong passwords for all users

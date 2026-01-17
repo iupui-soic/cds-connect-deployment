@@ -1,0 +1,12 @@
+{
+  "_comment": "User credentials for local authentication. Passwords MUST be bcrypt hashed.",
+  "_instructions": [
+    "1. Copy this file to local-users.json",
+    "2. Add your users with bcrypt-hashed passwords",
+    "3. To generate a bcrypt hash, run:",
+    "   node -e \"require('bcryptjs').hash('yourpassword', 10).then(console.log)\"",
+    "4. NEVER commit local-users.json to version control"
+  ],
+  "admin": "$2b$10$REPLACE_WITH_BCRYPT_HASH_FOR_ADMIN_PASSWORD",
+  "user1": "$2b$10$REPLACE_WITH_BCRYPT_HASH_FOR_USER1_PASSWORD"
+}

@@ -25,5 +25,8 @@ config/libraries/*
 config/hooks/*
 !config/hooks/.gitkeep
 
+# Local users file (contains password hashes - use local-users.example.json as template)
+config/local-users.json
+
 # MongoDB init scripts with credentials
 mongo-init/

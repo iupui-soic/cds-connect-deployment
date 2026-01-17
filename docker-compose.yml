@@ -16,8 +16,7 @@ services:
       - certbot-webroot:/var/www/certbot
     depends_on:
       - cql-services
-      - authoring-frontend
-      - authoring-api
+      - authoring-tool
     restart: unless-stopped
     networks:
       - cds-network
@@ -59,19 +58,45 @@ services:
       timeout: 10s
       retries: 3
 
-  # CDS Authoring Tool - API Backend
-  authoring-api:
-    image: ghcr.io/iupui-soic/ahrq-cds-connect-authoring-tool-api:${AUTHORING_TOOL_VERSION:-latest}
-    container_name: cds-authoring-api
+  # CDS Authoring Tool (Combined API + Frontend)
+  # Uses PM2 to run both API (port 3001) and Frontend (port 9000)
+  authoring-tool:
+    image: ghcr.io/iupui-soic/ahrq-cds-connect-authoring-tool:${AUTHORING_TOOL_VERSION:-latest}
+    container_name: cds-authoring-tool
     environment:
       - NODE_ENV=production
+      # API Configuration
       - MONGO_URL=mongodb://mongodb:27017/cds-authoring
       - CQL_TO_ELM_URL=http://cql-to-elm:8080/cql/translator
+      - CQL_FORMATTER_URL=http://cql-to-elm:8080/cql/formatter
       - API_PORT=3001
       - AUTH_SESSION_SECRET=${AUTH_SESSION_SECRET}
+      - AUTH_LOCAL_ACTIVE=${AUTH_LOCAL_ACTIVE:-true}
       - UMLS_API_KEY=${UMLS_API_KEY}
       - REPO_PUBLISH_ENDPOINT=${REPO_PUBLISH_ENDPOINT:-}
       - REPO_PUBLISH_TOKEN=${REPO_PUBLISH_TOKEN:-}
+      # CQL Services Sync Configuration
+      - CQL_SERVICES_SYNC_ENABLED=${CQL_SERVICES_SYNC_ENABLED:-true}
+      - CQL_SERVICES_LIBRARIES_PATH=/cql-services-config/libraries
+      - CQL_SERVICES_HOOKS_PATH=/cql-services-config/hooks
+      # Frontend Configuration
+      - PORT=9000
+      - REACT_APP_API_URL=/authoring/api
+      - REACT_APP_DAP_URL=${REACT_APP_DAP_URL:-}
+      - REACT_APP_GTM_KEY=${REACT_APP_GTM_KEY:-}
+      # Branding Configuration (optional - header hidden if not enabled)
+      - REACT_APP_BRANDING_ENABLED=${REACT_APP_BRANDING_ENABLED:-false}
+      - REACT_APP_BRANDING_IMAGE_URL=${REACT_APP_BRANDING_IMAGE_URL:-}
+      - REACT_APP_BRANDING_IMAGE_ALT=${REACT_APP_BRANDING_IMAGE_ALT:-Organization logo}
+      - REACT_APP_BRANDING_TEXT=${REACT_APP_BRANDING_TEXT:-}
+      - REACT_APP_BRANDING_LINK_URL=${REACT_APP_BRANDING_LINK_URL:-}
+      - REACT_APP_BRANDING_COLOR=${REACT_APP_BRANDING_COLOR:-#990000}
+    volumes:
+      # Mount CQL Services config directories for sync (write access)
+      - ./config/libraries:/cql-services-config/libraries
+      - ./config/hooks:/cql-services-config/hooks
+      # Mount local users file for authentication (passwords must be bcrypt hashed)
+      - ./config/local-users.json:/usr/src/app/api/config/local-users.json:ro
     depends_on:
       - mongodb
       - cql-to-elm
@@ -83,22 +108,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # CDS Authoring Tool - Frontend
-  authoring-frontend:
-    image: ghcr.io/iupui-soic/ahrq-cds-connect-authoring-tool-frontend:${AUTHORING_TOOL_VERSION:-latest}
-    container_name: cds-authoring-frontend
-    environment:
-      - NODE_ENV=production
-      - PORT=9000
-      - REACT_APP_API_URL=/authoring/api
-      - REACT_APP_DAP_URL=${REACT_APP_DAP_URL:-}
-      - REACT_APP_GTM_KEY=${REACT_APP_GTM_KEY:-}
-    depends_on:
-      - authoring-api
-    restart: unless-stopped
-    networks:
-      - cds-network
 
   # MongoDB for Authoring Tool
   mongodb:
