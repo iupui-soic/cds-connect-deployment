@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Nginx reverse proxy with Let's Encrypt
   nginx:
@@ -72,6 +70,7 @@ services:
       - API_PORT=3001
       - AUTH_SESSION_SECRET=${AUTH_SESSION_SECRET}
       - AUTH_LOCAL_ACTIVE=${AUTH_LOCAL_ACTIVE:-true}
+      - AUTH_LDAP_ACTIVE=${AUTH_LDAP_ACTIVE:-false}
       - UMLS_API_KEY=${UMLS_API_KEY}
       - REPO_PUBLISH_ENDPOINT=${REPO_PUBLISH_ENDPOINT:-}
       - REPO_PUBLISH_TOKEN=${REPO_PUBLISH_TOKEN:-}
@@ -85,12 +84,13 @@ services:
       - REACT_APP_DAP_URL=${REACT_APP_DAP_URL:-}
       - REACT_APP_GTM_KEY=${REACT_APP_GTM_KEY:-}
       # Branding Configuration (optional - header hidden if not enabled)
-      - REACT_APP_BRANDING_ENABLED=${REACT_APP_BRANDING_ENABLED:-false}
-      - REACT_APP_BRANDING_IMAGE_URL=${REACT_APP_BRANDING_IMAGE_URL:-}
-      - REACT_APP_BRANDING_IMAGE_ALT=${REACT_APP_BRANDING_IMAGE_ALT:-Organization logo}
-      - REACT_APP_BRANDING_TEXT=${REACT_APP_BRANDING_TEXT:-}
-      - REACT_APP_BRANDING_LINK_URL=${REACT_APP_BRANDING_LINK_URL:-}
-      - REACT_APP_BRANDING_COLOR=${REACT_APP_BRANDING_COLOR:-#990000}
+      # These are now runtime config served via /authoring/api/config
+      - BRANDING_ENABLED=${BRANDING_ENABLED:-false}
+      - BRANDING_IMAGE_URL=${BRANDING_IMAGE_URL:-}
+      - BRANDING_IMAGE_ALT=${BRANDING_IMAGE_ALT:-Organization logo}
+      - BRANDING_TEXT=${BRANDING_TEXT:-}
+      - BRANDING_LINK_URL=${BRANDING_LINK_URL:-}
+      - BRANDING_COLOR=${BRANDING_COLOR:-#990000}
     volumes:
       # Mount CQL Services config directories for sync (write access)
       - ./config/libraries:/cql-services-config/libraries
@@ -110,8 +110,10 @@ services:
       retries: 3
 
   # MongoDB for Authoring Tool
+  # Note: Using mongo:4.4 for compatibility with servers without AVX CPU support
+  # Use mongo:6.0 or newer if your server supports AVX instructions
   mongodb:
-    image: mongo:6.0
+    image: mongo:4.4
     container_name: cds-mongodb
     environment:
       - MONGO_INITDB_DATABASE=cds-authoring

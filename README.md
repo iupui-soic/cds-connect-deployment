@@ -39,19 +39,119 @@ Infrastructure and deployment configuration for CDS Connect services.
 ### 1. Clone and Configure
 
 ```bash
-# On your production server
+# On your production server (Ubuntu/Debian with Docker installed)
 git clone https://github.com/iupui-soic/cds-connect-deployment.git
 cd cds-connect-deployment
 
-# Copy and edit environment variables
+# Copy environment variables template
 cp .env.example .env
-nano .env  # Fill in required values
 ```
 
-### 2. Add CQL Libraries and Hooks
+### 2. Edit Environment Variables
 
 ```bash
-# Create config directories
+nano .env
+```
+
+**Required changes:**
+
+```bash
+# 1. Set your domain
+DOMAIN=yourdomain.org
+LETSENCRYPT_EMAIL=admin@yourdomain.org
+
+# 2. Generate and set a session secret (run this command first, then paste result)
+#    openssl rand -hex 32
+AUTH_SESSION_SECRET=paste-the-64-character-hex-string-here
+
+# 3. Set your UMLS API key (get from https://uts.nlm.nih.gov/uts/)
+UMLS_API_KEY=your-actual-umls-key
+```
+
+> **Important:** The `.env` file does NOT execute shell commands. You must run `openssl rand -hex 32` separately and paste the resulting value.
+
+### 3. Configure Users
+
+```bash
+# Copy the example users file
+cp config/local-users.example.json config/local-users.json
+
+# Generate a bcrypt hash for your password (using Docker)
+docker run --rm node:18-alpine sh -c \
+  'cd /tmp && npm init -y >/dev/null 2>&1 && npm install bcryptjs >/dev/null 2>&1 && node -e "require(\"bcryptjs\").hash(\"YOUR_PASSWORD_HERE\", 10).then(console.log)"'
+```
+
+Edit `config/local-users.json` with the generated hash:
+
+```bash
+nano config/local-users.json
+```
+
+```json
+{
+  "admin": "$2b$10$paste-your-bcrypt-hash-here"
+}
+```
+
+> **Security Note:** Never commit `local-users.json` to version control. It's already in `.gitignore`.
+
+### 4. Update nginx Domain (if not using cdsconnect.org)
+
+If using a different domain, update the nginx configuration:
+
+```bash
+# Edit the SSL config
+nano nginx/conf.d/cdsconnect.conf
+
+# Replace all occurrences of 'cdsconnect.org' with your domain
+# Lines to change: server_name and ssl_certificate paths
+```
+
+Also update the init config template:
+
+```bash
+nano nginx/conf.d/cdsconnect-init.conf.example
+# Replace 'cdsconnect.org' with your domain
+```
+
+### 5. Initialize SSL Certificates
+
+```bash
+# Make script executable
+chmod +x init-ssl.sh
+
+# Ensure your domain's DNS points to this server, then run:
+./init-ssl.sh
+```
+
+The script will:
+1. Temporarily start nginx for the ACME challenge
+2. Obtain certificates from Let's Encrypt
+3. Configure nginx with SSL and start all services
+
+### 6. Verify Deployment
+
+```bash
+# Check all services are running
+docker compose ps
+
+# Test the endpoints
+curl -k https://localhost/health
+curl -k https://localhost/cds-services
+curl -k https://localhost/authoring/api/config
+
+# View logs if needed
+docker compose logs -f
+```
+
+Your services are now available at:
+- **CQL Services:** https://yourdomain.org/cds-services
+- **Authoring Tool:** https://yourdomain.org/authoring
+
+### 7. Add CQL Libraries (Optional)
+
+```bash
+# Create directories if they don't exist
 mkdir -p config/libraries config/hooks
 
 # Copy your CQL libraries (ELM JSON files)
@@ -59,53 +159,9 @@ cp -r /path/to/your/libraries/* config/libraries/
 
 # Copy your hook configurations
 cp -r /path/to/your/hooks/* config/hooks/
-```
 
-### 3. Initialize SSL Certificates
-
-```bash
-# Make script executable
-chmod +x init-ssl.sh
-
-# Run SSL initialization (first time only)
-./init-ssl.sh
-```
-
-### 4. Configure Users
-
-Create a users file with bcrypt-hashed passwords:
-
-```bash
-# Copy the example file
-cp config/local-users.example.json config/local-users.json
-
-# Generate a bcrypt hash for each user password
-node -e "require('bcryptjs').hash('your-password-here', 10).then(console.log)"
-```
-
-Edit `config/local-users.json` with your users:
-
-```json
-{
-  "admin": "$2b$10$your-bcrypt-hash-here",
-  "researcher1": "$2b$10$another-bcrypt-hash"
-}
-```
-
-> **Security Note:** Never commit `local-users.json` to version control. It's already in `.gitignore`.
-
-### 5. Deploy
-
-```bash
-# Pull images and start all services
-docker-compose pull
-docker-compose up -d
-
-# Check status
-docker-compose ps
-
-# View logs
-docker-compose logs -f
+# Restart CQL Services to pick up new files
+docker compose restart cql-services
 ```
 
 ## User Management
@@ -177,8 +233,8 @@ cds-connect-deployment/
 ├── nginx/
 │   ├── nginx.conf               # Main nginx config
 │   └── conf.d/
-│       ├── cdsconnect.conf      # Site config with SSL
-│       └── cdsconnect-init.conf # Initial config for SSL setup
+│       ├── cdsconnect.conf              # Site config with SSL
+│       └── cdsconnect-init.conf.example # Template for initial SSL setup
 ├── config/
 │   ├── libraries/               # Your CQL/ELM libraries
 │   ├── hooks/                   # Your CDS Hooks configurations

@@ -8,9 +8,11 @@
 
 set -e
 
-# Load environment variables
+# Load environment variables (handle values with special characters)
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+    set -a
+    source .env
+    set +a
 fi
 
 # Configuration
@@ -26,8 +28,9 @@ echo "Email: $EMAIL"
 echo "Staging: $STAGING"
 echo "============================================="
 
-# Check if certificates already exist
-if [ -d "./certbot/conf/live/$DOMAIN" ]; then
+# Check if certificates already exist in the volume
+CERT_EXISTS=$(docker run --rm -v cds-certbot-etc:/etc/letsencrypt alpine ls /etc/letsencrypt/live/$DOMAIN 2>/dev/null || echo "no")
+if [ "$CERT_EXISTS" != "no" ]; then
     echo "Certificates already exist for $DOMAIN"
     read -p "Do you want to renew/replace them? (y/N) " -n 1 -r
     echo
@@ -40,17 +43,26 @@ fi
 echo "Step 1: Preparing nginx for certificate challenge..."
 
 # Backup SSL config and use init config
-if [ -f "nginx/conf.d/cdsconnect.conf" ]; then
+if [ -f "nginx/conf.d/cdsconnect.conf" ] && [ ! -f "nginx/conf.d/cdsconnect.conf.ssl" ]; then
     mv nginx/conf.d/cdsconnect.conf nginx/conf.d/cdsconnect.conf.ssl
 fi
 
-if [ -f "nginx/conf.d/cdsconnect-init.conf" ]; then
-    cp nginx/conf.d/cdsconnect-init.conf nginx/conf.d/cdsconnect.conf
+if [ -f "nginx/conf.d/cdsconnect-init.conf.example" ]; then
+    cp nginx/conf.d/cdsconnect-init.conf.example nginx/conf.d/cdsconnect.conf
 fi
 
-# Start nginx
-docker-compose up -d nginx
+# Stop all services first
+docker compose down 2>/dev/null || true
+
+# Start only nginx
+docker compose up -d nginx
 sleep 5
+
+# Verify nginx is running
+if ! docker compose ps nginx | grep -q "Up"; then
+    echo "ERROR: nginx failed to start. Check logs with: docker compose logs nginx"
+    exit 1
+fi
 
 # Request certificate
 echo "Step 2: Requesting SSL certificate from Let's Encrypt..."
@@ -61,9 +73,16 @@ if [ "$STAGING" = "1" ]; then
     echo "Using Let's Encrypt STAGING environment (certificates will NOT be valid)"
 fi
 
-docker-compose run --rm certbot certonly \
-    --webroot \
-    --webroot-path=/var/www/certbot \
+# Stop nginx to free port 80 for standalone mode
+docker compose stop nginx
+
+# Use standalone mode (more reliable)
+docker run -it --rm \
+    -p 80:80 \
+    -v cds-certbot-etc:/etc/letsencrypt \
+    -v cds-certbot-var:/var/lib/letsencrypt \
+    certbot/certbot certonly \
+    --standalone \
     $STAGING_ARG \
     --email $EMAIL \
     --agree-tos \
@@ -80,9 +99,12 @@ if [ -f "nginx/conf.d/cdsconnect.conf.ssl" ]; then
     mv nginx/conf.d/cdsconnect.conf.ssl nginx/conf.d/cdsconnect.conf
 fi
 
-# Restart nginx with SSL config
-echo "Step 4: Restarting nginx with SSL..."
-docker-compose restart nginx
+# Remove init config to avoid conflicts
+rm -f nginx/conf.d/cdsconnect-init.conf
+
+# Start all services
+echo "Step 4: Starting all services..."
+docker compose up -d
 
 echo "============================================="
 echo "SSL Setup Complete!"
